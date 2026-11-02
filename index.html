@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Low-Poly Builder</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2f36; font-family: system-ui, sans-serif; color: #e6e6e6; font-size: 13px; touch-action: none; }
+  canvas { display: block; touch-action: none; }
+  .panel { position: absolute; background: rgba(22, 25, 30, 0.92); border-radius: 8px; padding: 12px; box-sizing: border-box; }
+  #top { top: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; padding: 8px 10px; max-width: 96vw; box-sizing: border-box; }
+  #top .title { font-weight: 600; margin-right: 6px; }
+  #left { top: 90px; left: 10px; width: 160px; }
+  #right { top: 90px; right: 10px; width: 230px; display: none; max-height: calc(100vh - 110px); overflow-y: auto; }
+  #right.show { display: block; }
+  #hint { bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.8; max-width: 96vw; text-align: center; }
+  h2 { font-size: 13px; margin: 0 0 8px; }
+  h3 { font-size: 12px; margin: 12px 0 4px; opacity: 0.8; }
+  button { background: #3a404a; color: #eee; border: 1px solid #4b525e; border-radius: 5px; padding: 6px 9px; cursor: pointer; font-size: 12px; }
+  button:hover:not(:disabled) { background: #4a5260; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.active { background: #2f7de1; border-color: #2f7de1; }
+  button.primary { background: #2f9e5b; border-color: #2f9e5b; }
+  button.wide { width: 100%; margin-top: 6px; }
+  .shape { background: #3a404a; border: 1px solid #4b525e; border-radius: 5px; padding: 8px; margin-bottom: 6px; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+  .shape:hover { background: #4a5260; }
+  label { display: block; margin: 8px 0 3px; }
+  input[type=text], input[type=number], select { width: 100%; box-sizing: border-box; background: #2a2f37; color: #eee; border: 1px solid #4b525e; border-radius: 4px; padding: 5px; font-size: 13px; }
+  input[type=color] { width: 100%; height: 30px; border: none; background: none; padding: 0; }
+  input[type=range] { width: 100%; }
+  input[type=checkbox] { vertical-align: middle; }
+  input:disabled { opacity: 0.4; }
+  .row3 { display: flex; gap: 4px; }
+  .row3 > div { flex: 1; min-width: 0; font-size: 11px; }
+  .note { opacity: 0.6; font-size: 11px; margin: 8px 0 0; }
+  .count { opacity: 0.6; font-size: 12px; margin-left: 6px; }
+
+  /* Phone layout: palette becomes a bottom strip, properties a sheet above it */
+  @media (max-width: 760px) {
+    #top { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; width: 96vw; padding: 6px; }
+    #top .title, #top .count { display: none; }
+    #top button, #top label { flex: 0 0 auto; }
+    #left { top: auto; bottom: 10px; left: 8px; right: 8px; width: auto; padding: 8px; display: flex; gap: 6px; overflow-x: auto; }
+    #left h2, #left .note { display: none; }
+    #left .shape { margin: 0; white-space: nowrap; flex: 0 0 auto; }
+    #right { top: auto; bottom: 74px; left: 8px; right: 8px; width: auto; max-height: 45vh; }
+    #hint { display: none; }
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+</head>
+<body>
+
+<div id="top" class="panel">
+  <span class="title">Low-Poly Builder</span>
+  <button id="bMove" class="active" title="W">Move</button>
+  <button id="bRot" title="E">Rotate</button>
+  <button id="bScale" title="R">Scale</button>
+  <button id="bMulti" title="Tap objects to add or remove them from the selection">Multi: off</button>
+  <label style="margin:0 4px"><input type="checkbox" id="snap" checked> Snap</label>
+  <button id="bGroup" title="Ctrl+G" disabled>Group</button>
+  <button id="bUngroup" title="Ctrl+Shift+G" disabled>Ungroup</button>
+  <button id="bMerge" title="Ctrl+M" disabled>Merge</button>
+  <button id="bDup" title="Ctrl+D" disabled>Duplicate</button>
+  <button id="bDel" title="Delete" disabled>Delete</button>
+  <button id="bClear">Clear</button>
+  <button id="bImport">Import GLB</button>
+  <button id="bExport" class="primary">Export GLB</button>
+  <span class="count" id="count">0 objects</span>
+</div>
+
+<div id="left" class="panel">
+  <h2>Shapes</h2>
+  <div class="shape" data-type="box">Box</div>
+  <div class="shape" data-type="slab">Slab</div>
+  <div class="shape" data-type="cylinder">Cylinder</div>
+  <div class="shape" data-type="cone">Cone</div>
+  <div class="shape" data-type="sphere">Sphere</div>
+  <div class="shape" data-type="rock">Rock</div>
+  <div class="shape" data-type="wedge">Wedge</div>
+  <p class="note">Drag a shape onto the floor or a face. Tap to add at the center.</p>
+</div>
+
+<div id="right" class="panel">
+  <h2>Selected</h2>
+  <label>Name <input type="text" id="pName"></label>
+  <label>Color <input type="color" id="pColor"></label>
+  <label>Roughness <input type="range" id="pRough" min="0" max="1" step="0.05"></label>
+  <label>Metalness <input type="range" id="pMetal" min="0" max="1" step="0.05"></label>
+  <label>Texture <select id="pTex"></select></label>
+  <button class="wide" id="bUploadTex">Upload image texture…</button>
+
+  <h3>Position (single object)</h3>
+  <div class="row3">
+    <div>X<input type="number" id="pX" step="0.1"></div>
+    <div>Y<input type="number" id="pY" step="0.1"></div>
+    <div>Z<input type="number" id="pZ" step="0.1"></div>
+  </div>
+  <label>Rotate Y (degrees) <input type="number" id="pRY" step="15"></label>
+
+  <p class="note">Color, roughness, and texture apply to every selected object. For natural wood or stone, set the color to white so the texture shows untinted.</p>
+</div>
+
+<div id="hint" class="panel">Move/Rotate/Scale: W/E/R &nbsp;·&nbsp; Click select · Shift+click add &nbsp;·&nbsp; Ctrl+G group · Ctrl+Shift+G ungroup · Ctrl+M merge &nbsp;·&nbsp; Ctrl+A select all &nbsp;·&nbsp; Del delete &nbsp;·&nbsp; Ctrl+D duplicate &nbsp;·&nbsp; Esc deselect</div>
+
+<input type="file" id="fileGLB" accept=".glb" hidden>
+<input type="file" id="fileImg" accept="image/*" hidden>
+
+<script>
+// ---------- Scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2b2f36);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(6, 6, 8);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// OrbitControls handles touch too: one finger rotates, two fingers pinch to zoom
+const orbit = new THREE.OrbitControls(camera, renderer.domElement);
+orbit.target.set(0, 1, 0);
+orbit.enableDamping = true;
+orbit.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(5, 10, 7);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 0.5, far: 50 });
+scene.add(sun);
+
+scene.add(new THREE.GridHelper(40, 40, 0x666b75, 0x44484f));
+
+const floorShadow = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.25 }));
+floorShadow.rotation.x = -Math.PI / 2;
+floorShadow.receiveShadow = true;
+scene.add(floorShadow);
+
+// Everything the user builds or imports lives here (this is what gets exported)
+const worldGroup = new THREE.Group();
+scene.add(worldGroup);
+
+// ---------- Shapes (unit-sized, scaled per object) ----------
+const SHAPES = {
+  box:      () => new THREE.BoxGeometry(1, 1, 1),
+  slab:     () => new THREE.BoxGeometry(2, 0.2, 2),
+  cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 8),
+  cone:     () => new THREE.ConeGeometry(0.5, 1, 6),
+  sphere:   () => new THREE.SphereGeometry(0.5, 8, 6),
+  rock:     () => new THREE.IcosahedronGeometry(0.5, 0),
+  wedge:    () => {
+    const s = new THREE.Shape();
+    s.moveTo(0, 0); s.lineTo(1, 0); s.lineTo(0, 1); s.lineTo(0, 0);
+    const g = new THREE.ExtrudeGeometry(s, { depth: 1, bevelEnabled: false });
+    g.translate(-0.5, -0.5, -0.5);
+    return g;
+  }
+};
+
+const COLORS = ['#d9c3a0', '#7a8b99', '#c0504d', '#8fb996', '#e8e2d4', '#5b4636', '#e0b04a'];
+
+// ---------- Texture library ----------
+const TEX = {};   // key -> { name, tex }
+
+function rnd(a, b) { return a + Math.random() * (b - a); }
+
+function makeCanvasTex(draw) {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+const PROCEDURAL = {
+  wood: { name: 'Wood grain', draw(g, s) {
+    g.fillStyle = '#9a6b3c';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 60; i++) {
+      const y0 = rnd(0, s);
+      g.strokeStyle = `rgba(${Math.round(rnd(60, 100))},${Math.round(rnd(35, 55))},15,${rnd(0.15, 0.5)})`;
+      g.lineWidth = rnd(1, 4);
+      g.beginPath();
+      g.moveTo(0, y0);
+      for (let x = 0; x <= s; x += 16) g.lineTo(x, y0 + Math.sin(x * 0.05 + i) * 2 + rnd(0, 1.5));
+      g.stroke();
+    }
+  }},
+  stone: { name: 'Stone', draw(g, s) {
+    g.fillStyle = '#8c8a84';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 400; i++) {
+      const v = Math.round(rnd(90, 170));
+      g.fillStyle = `rgba(${v},${v},${v - 4},0.35)`;
+      g.beginPath();
+      g.arc(rnd(0, s), rnd(0, s), rnd(1, 5), 0, Math.PI * 2);
+      g.fill();
+    }
+  }},
+  brick: { name: 'Brick', draw(g, s) {
+    g.fillStyle = '#c9bfae';
+    g.fillRect(0, 0, s, s);
+    const bw = 64, bh = 32;
+    for (let row = 0, y = 0; y < s; row++, y += bh) {
+      const off = row % 2 ? bw / 2 : 0;
+      for (let x = -off; x < s; x += bw) {
+        const v = Math.round(rnd(-12, 12));
+        g.fillStyle = `rgb(${155 + v},${72 + Math.round(v / 2)},${50 + Math.round(v / 2)})`;
+        g.fillRect(x + 2, y + 2, bw - 4, bh - 4);
+      }
+    }
+  }},
+  plaster: { name: 'Plaster', draw(g, s) {
+    g.fillStyle = '#e8e2d4';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.5)';
+      g.fillRect(rnd(0, s), rnd(0, s), rnd(1, 3), rnd(1, 3));
+    }
+  }},
+  fabric: { name: 'Fabric', draw(g, s) {
+    g.fillStyle = '#5d6e7e';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < s; i += 4) {
+      g.fillStyle = 'rgba(0,0,0,0.10)';
+      g.fillRect(0, i, s, 1);
+      g.fillRect(i, 0, 1, s);
+    }
+    for (let i = 2; i < s; i += 8) {
+      g.fillStyle = 'rgba(255,255,255,0.05)';
+      g.fillRect(0, i, s, 2);
+    }
+  }},
+  checker: { name: 'Checker', draw(g, s) {
+    const n = 8, q = s / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      g.fillStyle = (i + j) % 2 ? '#f2f2f2' : '#2b2b2b';
+      g.fillRect(i * q, j * q, q, q);
+    }
+  }},
+  grass: { name: 'Grass', draw(g, s) {
+    g.fillStyle = '#5f8f3e';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 1500; i++) {
+      g.strokeStyle = `rgba(${Math.round(rnd(60, 120))},${Math.round(rnd(120, 170))},${Math.round(rnd(40, 70))},0.7)`;
+      g.lineWidth = 1;
+      const x = rnd(0, s), y = rnd(0, s);
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + rnd(-2, 2), y - rnd(3, 7));
+      g.stroke();
+    }
+  }}
+};
+
+for (const key of Object.keys(PROCEDURAL)) {
+  TEX[key] = { name: PROCEDURAL[key].name, tex: makeCanvasTex(PROCEDURAL[key].draw) };
+}
+
+let imageCount = 0;
+let groupCount = 0;
+let mergeCount = 0;
+
+function refreshTexOptions() {
+  const sel = document.getElementById('pTex');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = 'none';
+  none.textContent = 'None';
+  sel.appendChild(none);
+  for (const key of Object.keys(TEX)) {
+    const o = document.createElement('option');
+    o.value = key;
+    o.textContent = TEX[key].name;
+    sel.appendChild(o);
+  }
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+
+function keyForTex(tex) {
+  if (!tex) return 'none';
+  for (const key of Object.keys(TEX)) if (TEX[key].tex === tex) return key;
+  const key = 'embedded_' + (++imageCount);
+  TEX[key] = { name: 'Embedded image ' + imageCount, tex };
+  refreshTexOptions();
+  return key;
+}
+
+// ---------- Object helpers ----------
+let colorIndex = 0;
+const typeCounts = {};
+
+function createObject(type) {
+  const geo = SHAPES[type]();
+  geo.computeBoundingBox();
+  const mat = new THREE.MeshStandardMaterial({
+    color: COLORS[colorIndex++ % COLORS.length],
+    roughness: 0.7,
+    metalness: 0,
+    flatShading: true
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  typeCounts[type] = (typeCounts[type] || 0) + 1;
+  mesh.name = `${type}_${typeCounts[type]}`;
+  mesh.userData.type = type;
+  return mesh;
+}
+
+function sizeOf(obj) {
+  return new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
+}
+
+function meshesOf(obj) {
+  const list = [];
+  obj.traverse(o => { if (o.isMesh) list.push(o); });
+  return list;
+}
+
+// A merged mesh has an array of materials; always work with a list
+function matsOf(mesh) {
+  return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+}
+
+// Climb from a hit mesh up to the direct child of worldGroup the user sees
+function topLevel(obj) {
+  while (obj.parent && obj.parent !== worldGroup) obj = obj.parent;
+  return obj;
+}
+
+function addObject(obj, pos) {
+  obj.position.copy(pos);
+  worldGroup.add(obj);
+  setSelection([obj]);
+  updateCount();
+}
+
+// ---------- Raycasting & placement ----------
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+function setRayFromEvent(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+}
+
+// On an existing object: sit flush against the hit face.
+// On the floor: sit on the floor (0.5 grid when snap is on).
+function placementFor(obj, e) {
+  setRayFromEvent(e);
+  const size = sizeOf(obj);
+
+  const hits = ray.intersectObjects(worldGroup.children, true);
+  if (hits.length && hits[0].face) {
+    const h = hits[0];
+    const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+    const half = (Math.abs(n.x) * size.x + Math.abs(n.y) * size.y + Math.abs(n.z) * size.z) / 2;
+    return h.point.clone().addScaledVector(n, half);
+  }
+
+  const p = new THREE.Vector3();
+  if (ray.ray.intersectPlane(floorPlane, p)) {
+    if (snapEnabled()) {
+      p.x = Math.round(p.x * 2) / 2;
+      p.z = Math.round(p.z * 2) / 2;
+    }
+    p.y = size.y / 2;
+    return p;
+  }
+  return null;
+}
+
+// ---------- Transform gizmo ----------
+const tc = new THREE.TransformControls(camera, renderer.domElement);
+scene.add(tc);
+
+// Invisible pivot used to move several selected objects together
+const pivot = new THREE.Object3D();
+scene.add(pivot);
+
+let selection = [];   // top-level objects currently selected
+let selected = null;  // last selected object, shown in the properties panel
+
+let pivotStart = null;
+let objStarts = [];
+
+tc.addEventListener('dragging-changed', e => {
+  orbit.enabled = !e.value;
+  if (e.value && tc.object === pivot) {
+    pivot.updateMatrixWorld(true);
+    pivotStart = pivot.matrixWorld.clone();
+    objStarts = selection.map(o => o.matrixWorld.clone());
+  } else if (!e.value) {
+    pivotStart = null;
+  }
+});
+
+tc.addEventListener('objectChange', () => {
+  if (tc.object === pivot && pivotStart) {
+    const delta = pivot.matrixWorld.clone().multiply(pivotStart.clone().invert());
+    selection.forEach((o, i) => {
+      delta.clone().multiply(objStarts[i]).decompose(o.position, o.quaternion, o.scale);
+    });
+  }
+  syncFields();
+});
+
+function setSelection(list) {
+  selection = list.filter(Boolean);
+  selected = selection.length ? selection[selection.length - 1] : null;
+
+  tc.detach();
+  if (selection.length === 1) {
+    tc.attach(selection[0]);
+  } else if (selection.length > 1) {
+    const box = new THREE.Box3();
+    selection.forEach(o => box.expandByObject(o));
+    box.getCenter(pivot.position);
+    pivot.quaternion.identity();
+    pivot.scale.set(1, 1, 1);
+    pivot.updateMatrixWorld(true);
+    tc.attach(pivot);
+  }
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const n = selection.length;
+  document.getElementById('bGroup').disabled = n < 2;
+  document.getElementById('bMerge').disabled = n < 2;
+  document.getElementById('bUngroup').disabled = !selection.some(o => o.userData.type === 'group');
+  document.getElementById('bDup').disabled = n === 0;
+  document.getElementById('bDel').disabled = n === 0;
+  if (selected) showProps(selected);
+  else document.getElementById('right').classList.remove('show');
+  syncFields();
+}
+
+function setMode(mode) {
+  tc.setMode(mode);
+  document.getElementById('bMove').classList.toggle('active', mode === 'translate');
+  document.getElementById('bRot').classList.toggle('active', mode === 'rotate');
+  document.getElementById('bScale').classList.toggle('active', mode === 'scale');
+}
+
+// ---------- Snapping ----------
+const snapBox = document.getElementById('snap');
+function snapEnabled() { return snapBox.checked; }
+function applySnap() {
+  if (snapEnabled()) {
+    tc.setTranslationSnap(0.5);
+    tc.setRotationSnap(THREE.MathUtils.degToRad(15));
+    tc.setScaleSnap(0.25);
+  } else {
+    tc.setTranslationSnap(null);
+    tc.setRotationSnap(null);
+    tc.setScaleSnap(null);
+  }
+}
+snapBox.addEventListener('change', applySnap);
+applySnap();
+
+// ---------- Properties panel (applies to every selected object) ----------
+const pName = document.getElementById('pName');
+const pColor = document.getElementById('pColor');
+const pRough = document.getElementById('pRough');
+const pMetal = document.getElementById('pMetal');
+const pTex = document.getElementById('pTex');
+const fX = document.getElementById('pX');
+const fY = document.getElementById('pY');
+const fZ = document.getElementById('pZ');
+const fRY = document.getElementById('pRY');
+
+function showProps(obj) {
+  const first = meshesOf(obj)[0];
+  if (!first) return;
+  const m = matsOf(first)[0];
+  pName.value = obj.name;
+  pColor.value = '#' + m.color.getHexString();
+  pRough.value = m.roughness;
+  pMetal.value = m.metalness;
+  pTex.value = keyForTex(m.map);
+  document.getElementById('right').classList.add('show');
+}
+
+// Numeric position and rotation: works well on touch screens and for exact placement.
+// Only enabled when exactly one object is selected.
+function syncFields() {
+  const one = selection.length === 1 ? selection[0] : null;
+  [fX, fY, fZ, fRY].forEach(f => { f.disabled = !one; });
+  if (!one) return;
+  fX.value = one.position.x.toFixed(2);
+  fY.value = one.position.y.toFixed(2);
+  fZ.value = one.position.z.toFixed(2);
+  fRY.value = THREE.MathUtils.radToDeg(one.rotation.y).toFixed(0);
+}
+
+function applyFields() {
+  const one = selection.length === 1 ? selection[0] : null;
+  if (!one) return;
+  const x = parseFloat(fX.value), y = parseFloat(fY.value), z = parseFloat(fZ.value), ry = parseFloat(fRY.value);
+  if (!isNaN(x)) one.position.x = x;
+  if (!isNaN(y)) one.position.y = y;
+  if (!isNaN(z)) one.position.z = z;
+  if (!isNaN(ry)) one.rotation.y = THREE.MathUtils.degToRad(ry);
+}
+[fX, fY, fZ, fRY].forEach(f => f.addEventListener('input', applyFields));
+
+function eachMaterial(fn) {
+  selection.forEach(obj => meshesOf(obj).forEach(mesh => matsOf(mesh).forEach(fn)));
+}
+
+pName.addEventListener('input', () => { if (selected) selected.name = pName.value; });
+pColor.addEventListener('input', () => eachMaterial(m => m.color.set(pColor.value)));
+pRough.addEventListener('input', () => eachMaterial(m => { m.roughness = parseFloat(pRough.value); }));
+pMetal.addEventListener('input', () => eachMaterial(m => { m.metalness = parseFloat(pMetal.value); }));
+pTex.addEventListener('change', () => applyTexture(pTex.value));
+
+function applyTexture(key) {
+  const tex = key === 'none' || !TEX[key] ? null : TEX[key].tex;
+  eachMaterial(m => { m.map = tex; m.needsUpdate = true; });
+  pTex.value = key;
+}
+
+// ---------- Selection actions ----------
+function disposeMaterials(obj) {
+  meshesOf(obj).forEach(mesh => matsOf(mesh).forEach(m => m.dispose()));
+}
+
+function updateCount() {
+  const n = worldGroup.children.length;
+  document.getElementById('count').textContent = n + (n === 1 ? ' object' : ' objects');
+}
+
+function removeSelection() {
+  selection.forEach(o => {
+    if (o.parent) o.parent.remove(o);
+    disposeMaterials(o);
+  });
+  setSelection([]);
+  updateCount();
+}
+
+function duplicateSelection() {
+  if (!selection.length) return;
+  const copies = selection.map(obj => {
+    const c = obj.clone(true);
+    c.traverse(o => {
+      if (o.isMesh) {
+        o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
+    c.position.add(new THREE.Vector3(1, 0, 1));
+    c.name = obj.name + '_copy';
+    worldGroup.add(c);
+    return c;
+  });
+  setSelection(copies);
+  updateCount();
+}
+
+function clearAll() {
+  while (worldGroup.children.length) {
+    const c = worldGroup.children[0];
+    worldGroup.remove(c);
+    disposeMaterials(c);
+  }
+  setSelection([]);
+  updateCount();
+}
+
+// ---------- Group / Ungroup ----------
+// A group moves, rotates, and scales all its children together. Children keep
+// their own shape, color, and texture and can still be tapped individually.
+function groupSelection() {
+  if (selection.length < 2) return;
+  const box = new THREE.Box3();
+  selection.forEach(o => box.expandByObject(o));
+  const g = new THREE.Group();
+  g.name = 'group_' + (++groupCount);
+  g.userData.type = 'group';
+  box.getCenter(g.position);
+  worldGroup.add(g);
+  selection.forEach(o => g.attach(o));   // attach keeps each object where it is
+  setSelection([g]);
+  updateCount();
+}
+
+function ungroupSelection() {
+  const groups = selection.filter(o => o.userData.type === 'group');
+  if (!groups.length) return;
+  const freed = [];
+  groups.forEach(g => {
+    [...g.children].forEach(c => { worldGroup.attach(c); freed.push(c); });
+    worldGroup.remove(g);
+  });
+  const others = selection.filter(o => o.userData.type !== 'group');
+  setSelection([...freed, ...others]);
+  updateCount();
+}
+
+// ---------- Merge ----------
+// Combines the selected meshes into one mesh. Each part keeps its own material
+// (color, roughness, texture), so the merged object looks the same.
+function cleanGeometry(src, matrix) {
+  let g = src.clone();
+  if (g.index) g = g.toNonIndexed();
+  for (const name of Object.keys(g.attributes)) {
+    if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+  }
+  if (!g.attributes.normal) g.computeVertexNormals();
+  if (!g.attributes.uv) {
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+  }
+  g.applyMatrix4(matrix);
+  g.groups = [];
+  return g;
+}
+
+function mergeSelection() {
+  const meshes = selection.flatMap(o => meshesOf(o));
+  if (meshes.length < 2) return;
+  meshes.forEach(m => m.updateMatrixWorld(true));
+
+  const geos = meshes.map(m => cleanGeometry(m.geometry, m.matrixWorld));
+  const merged = THREE.BufferGeometryUtils.mergeBufferGeometries(geos, true);
+  if (!merged) { alert('Could not merge these objects.'); return; }
+
+  const mats = meshes.map(m => matsOf(m)[0]);
+  const mesh = new THREE.Mesh(merged, mats);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = 'merged_' + (++mergeCount);
+  mesh.userData.type = 'merged';
+
+  selection.forEach(o => { if (o.parent) o.parent.remove(o); });
+  worldGroup.add(mesh);
+  setSelection([mesh]);
+  updateCount();
+}
+
+// ---------- Import GLB ----------
+const gltfLoader = new THREE.GLTFLoader();
+
+function importGLB(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    gltfLoader.parse(reader.result, '', gltf => {
+      const obj = gltf.scene;
+      obj.name = file.name.replace(/\.glb$/i, '');
+      obj.userData.type = 'imported';
+      obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      const box = new THREE.Box3().setFromObject(obj);
+      obj.position.y -= box.min.y;   // stand the model on the floor
+      worldGroup.add(obj);
+      setSelection([obj]);
+      updateCount();
+    }, err => alert('Import failed: ' + (err && err.message ? err.message : err)));
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ---------- Upload image texture ----------
+function addImageTexture(file) {
+  const url = URL.createObjectURL(file);
+  new THREE.TextureLoader().load(url, tex => {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const key = 'img_' + (++imageCount);
+    TEX[key] = { name: file.name, tex };
+    refreshTexOptions();
+    if (selection.length) applyTexture(key);
+  }, undefined, () => alert('Could not load that image.'));
+}
+
+// ---------- Export GLB ----------
+function exportGLB() {
+  if (!worldGroup.children.length) { alert('Add some shapes or import a model first.'); return; }
+  const exporter = new THREE.GLTFExporter();
+  exporter.parse(
+    worldGroup,
+    result => {
+      const blob = new Blob([result], { type: 'model/gltf-binary' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'lowpoly_scene.glb';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
+    err => alert('Export failed: ' + err),
+    { binary: true }
+  );
+}
+
+// ---------- Buttons ----------
+let multiMode = false;
+const bMulti = document.getElementById('bMulti');
+bMulti.addEventListener('click', () => {
+  multiMode = !multiMode;
+  bMulti.textContent = 'Multi: ' + (multiMode ? 'on' : 'off');
+  bMulti.classList.toggle('active', multiMode);
+});
+
+document.getElementById('bMove').addEventListener('click', () => setMode('translate'));
+document.getElementById('bRot').addEventListener('click', () => setMode('rotate'));
+document.getElementById('bScale').addEventListener('click', () => setMode('scale'));
+document.getElementById('bGroup').addEventListener('click', groupSelection);
+document.getElementById('bUngroup').addEventListener('click', ungroupSelection);
+document.getElementById('bMerge').addEventListener('click', mergeSelection);
+document.getElementById('bDup').addEventListener('click', duplicateSelection);
+document.getElementById('bDel').addEventListener('click', removeSelection);
+document.getElementById('bClear').addEventListener('click', () => {
+  if (confirm('Remove everything from the scene?')) clearAll();
+});
+document.getElementById('bExport').addEventListener('click', exportGLB);
+document.getElementById('bImport').addEventListener('click', () => document.getElementById('fileGLB').click());
+document.getElementById('bUploadTex').addEventListener('click', () => document.getElementById('fileImg').click());
+
+document.getElementById('fileGLB').addEventListener('change', e => {
+  if (e.target.files[0]) importGLB(e.target.files[0]);
+  e.target.value = '';
+});
+document.getElementById('fileImg').addEventListener('change', e => {
+  if (e.target.files[0]) addImageTexture(e.target.files[0]);
+  e.target.value = '';
+});
+
+refreshTexOptions();
+updateSelectionUI();
+
+// ---------- Palette: drag (mouse or touch) to place, tap to add ----------
+// Uses pointer events instead of HTML5 drag-and-drop, which doesn't work on phones.
+const canvasEl = renderer.domElement;
+
+document.querySelectorAll('.shape').forEach(el => {
+  const type = el.dataset.type;
+  let start = null;   // { x, y, moved } while a finger/mouse is down on this shape
+  let ghost = null;   // floating copy that follows the pointer while dragging
+
+  el.addEventListener('pointerdown', e => {
+    start = { x: e.clientX, y: e.clientY, moved: false };
+    el.setPointerCapture(e.pointerId);
+  });
+
+  el.addEventListener('pointermove', e => {
+    if (!start) return;
+    if (!start.moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) {
+      start.moved = true;
+      ghost = el.cloneNode(true);
+      ghost.style.cssText = 'position:fixed;pointer-events:none;opacity:0.85;z-index:50;width:120px;';
+      document.body.appendChild(ghost);
+    }
+    if (ghost) {
+      ghost.style.left = (e.clientX - 60) + 'px';
+      ghost.style.top = (e.clientY - 16) + 'px';
+    }
+  });
+
+  const finish = e => {
+    if (!start) return;
+    const moved = start.moved;
+    start = null;
+    if (ghost) { ghost.remove(); ghost = null; }
+
+    if (moved) {
+      // Dropped: only place it if the pointer is over the 3D view, not over a panel
+      if (e.type === 'pointerup' && document.elementFromPoint(e.clientX, e.clientY) === canvasEl) {
+        const mesh = createObject(type);
+        const pos = placementFor(mesh, e);
+        if (pos) addObject(mesh, pos);
+      }
+    } else if (e.type === 'pointerup') {
+      // Tap: add at the center of the scene
+      const mesh = createObject(type);
+      addObject(mesh, new THREE.Vector3(0, sizeOf(mesh).y / 2, 0));
+    }
+  };
+
+  el.addEventListener('pointerup', finish);
+  el.addEventListener('pointercancel', finish);
+});
+
+// ---------- Tap / click to select (Shift+click or Multi mode adds or removes) ----------
+let downX = 0, downY = 0;
+canvasEl.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; });
+canvasEl.addEventListener('pointerup', e => {
+  if (tc.axis) return;                                             // touched a gizmo handle
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 8) return; // was a drag or pinch
+  setRayFromEvent(e);
+  const hits = ray.intersectObjects(worldGroup.children, true);
+  const obj = hits.length ? topLevel(hits[0].object) : null;
+  if (e.shiftKey || multiMode) {
+    if (!obj) return;
+    setSelection(selection.includes(obj)
+      ? selection.filter(o => o !== obj)
+      : [...selection, obj]);
+  } else {
+    setSelection(obj ? [obj] : []);
+  }
+});
+
+// ---------- Keyboard shortcuts (desktop) ----------
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const k = e.key.toLowerCase();
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod) {
+    if (k === 'd') { e.preventDefault(); duplicateSelection(); }
+    else if (k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelection() : groupSelection(); }
+    else if (k === 'm') { e.preventDefault(); mergeSelection(); }
+    else if (k === 'a') { e.preventDefault(); setSelection([...worldGroup.children]); }
+    return;
+  }
+  if (k === 'w') setMode('translate');
+  else if (k === 'e') setMode('rotate');
+  else if (k === 'r') setMode('scale');
+  else if (k === 'delete' || k === 'backspace') removeSelection();
+  else if (k === 'escape') setSelection([]);
+});
+
+// ---------- Render loop ----------
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+(function animate() {
+  requestAnimationFrame(animate);
+  orbit.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
